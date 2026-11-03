@@ -1,0 +1,17 @@
+# Tested with Python 3.10.
+torch==2.1.0
+torchvision==0.16.0
+diffusers==0.25.1
+transformers==4.37.2
+peft==0.10.0
+accelerate==1.1.0
+huggingface-hub==0.25.1
+safetensors==0.4.3
+numpy==1.26.4
+Pillow==10.2.0
+timm==0.9.16
+# Optional, only needed for --evaluate / evaluate.py:
+pyiqa==0.1.14.1
+omegaconf==2.1.1
+ftfy==6.2.0
+regex==2024.4.16
