@@ -40,9 +40,9 @@ when `sd_path` is `null`; a local path can also be used.
 
 | Setting | Config | DA-CLIP (Google Drive) | Model (Google Drive) |
 |---|---|---|---|
-| 3-task | [ir_3task.yaml](configs/ir_3task.yaml) | To be added | To be added |
-| 5-task | [ir_5task.yaml](configs/ir_5task.yaml) | To be added | To be added |
-| 10-task | [ir_10task.yaml](configs/ir_10task.yaml) | To be added | To be added |
+| 3-task | [ir_3task.yaml](configs/ir_3task.yaml) | [daclip_3_tasks.pt](https://drive.google.com/drive/folders/16gdP3a-ere7b4J9N260UFqRd5p5Ug1XA?usp=sharing) | [model_3_tasks.pkl](https://drive.google.com/file/d/1lo7sBZ41S5eedlb6GDR2HvMqAddjGlfG/view?usp=sharing) |
+| 5-task | [ir_5task.yaml](configs/ir_5task.yaml) | [daclip_5_tasks.pt](https://drive.google.com/file/d/1NpzRoreqDKnK76U6ZwllN3AY8DFB3VTW/view?usp=sharing) | [model_5_tasks.pkl](https://drive.google.com/file/d/1uIlPJU8n8oPZbLU6jwmmbcThIIow0B5v/view?usp=sharing)|
+| 10-task | [ir_10task.yaml](configs/ir_10task.yaml) | [daclip_10_tasks.pt](https://drive.google.com/file/d/1PgsccmPyyzEI6-l0rLSptMh54rcUZ9rJ/view?usp=sharing) | [model_10_tasks.pkl](https://drive.google.com/file/d/1QB2cVzHywMklHDLBHZ3b7zZmQBYCZbXl/view?usp=sharing) |
 
 Use the corresponding filenames from the YAML:
 
