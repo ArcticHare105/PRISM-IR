@@ -1,6 +1,28 @@
-# PRISM-IR
+# PRISM-IR: Fine-Grained Expert Selection for All-in-One Image Restoration
 
-Training and testing for 3-task, 5-task, and 10-task image restoration.
+[Aiping Zhang]()<sup>1,*</sup>, [Zongsheng Yue]()<sup>2,*</sup>, [Yuning Cui]()<sup>3</sup>, [Alois Knoll]()<sup>3</sup>, [Renjing Pei]()<sup>4</sup>, [Wenqi Ren]()<sup>1</sup>, [Xiaochun Cao]()<sup>1</sup>
+
+<sup>1</sup>School of Cyber Science and Technology, Shenzhen Campus of Sun Yat-sen University, Shenzhen, China<br>
+<sup>2</sup>School of Mathematics and Statistics, Xi'an Jiaotong University, Shaanxi, China<br>
+<sup>3</sup>School of Computation, Information and Technology, Technical University of Munich, Munich, Germany<br>
+<sup>4</sup>Huawei Noah's Ark Lab
+</div>
+
+:fire::fire::fire: We have released the code, cheers!
+
+:star: If PRISM-IR is helpful for you, please help star this repo. Thanks! :hugs:
+
+## Framework Overview
+
+![Framework overview placeholder](assets/framework.png)
+
+<!-- Replace assets/framework.svg with the framework figure. -->
+
+## Visual Comparison
+
+![Visual comparison placeholder](assets/10d-compare.jpg)
+
+<!-- Replace assets/comparison.svg with the visual comparison figure. -->
 
 ## Installation
 
@@ -12,7 +34,7 @@ pip install -r requirements-training.txt
 
 ## Weights and Configuration
 
-Download the weights for the selected setting. Google Drive links will be added below.
+Download the weights for the selected setting. Download links will be added below.
 [SD-Turbo](https://huggingface.co/stabilityai/sd-turbo) is downloaded automatically
 when `sd_path` is `null`; a local path can also be used.
 
@@ -68,6 +90,30 @@ CUDA_VISIBLE_DEVICES=0 bash run_inference.sh --base_config configs/ir_10task.yam
 CUDA_VISIBLE_DEVICES=0 bash run_evaluate.sh \
   -i /path/to/outputs -r /path/to/GT
 ```
+
+## :smiley: Citation
+
+Please cite us if our work is useful for your research.
+
+```
+@article{zhang2026prism,
+  title=     {PRISM-IR: Fine-Grained Expert Selection for All-in-One Image Restoration},
+  author=    {Zhang, Aiping and Yue, Zongsheng and Cui, Yuning and Knoll, Alois and Pei, Renjing and Ren, Wenqi and Cao, Xiaochun},
+  journal=   {IEEE Transactions on Image Processing},
+  year=      {2026},
+  publisher= {IEEE}
+}
+```
+
+## :notebook: License
+
+This project is released under the [Apache 2.0 license](LICENSE).
+
+
+## :envelope: Contact
+
+If you have any questions, please feel free to contact zhangaip7@mail2.sysu.edu.cn.
+
 
 ## Acknowledgements
 
