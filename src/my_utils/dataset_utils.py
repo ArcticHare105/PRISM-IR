@@ -53,14 +53,13 @@ class IRTrainDataset(Dataset):
         root = dataset_opt.get("dataroot", ROOT)
         tasks = dataset_opt["de_type"]
         patch_size = dataset_opt.get("patch_size", 256)
-        seed = dataset_opt.get("seed", 42)
         samples = dataset_opt.get("samples", 10000)
         limit = dataset_opt.get("limit_per_task", 0)
         synthetic_noise_jpeg = dataset_opt.get("synthetic_noise_jpeg", True)
         label_smoothing = dataset_opt.get("label_smooth", 0.1)
         self.dataset_opt = dataset_opt
         self.root, self.tasks = Path(root), tasks
-        self.patch_size, self.seed, self.samples = patch_size, seed, samples
+        self.patch_size, self.samples = patch_size, samples
         self.synthetic = synthetic_noise_jpeg
         self.smoothing = label_smoothing
         self.pairs = {}
@@ -106,9 +105,10 @@ class IRTrainDataset(Dataset):
         return self.samples
 
     def __getitem__(self, index):
-        rng = random.Random(self.seed + index * 1000003)
-        task = rng.choices(self.tasks, weights=[TASK_WEIGHTS[t] for t in self.tasks])[0]
-        lq_path, gt_path = rng.choice(self.pairs[task])
+        task = random.choices(
+            self.tasks, weights=[TASK_WEIGHTS[t] for t in self.tasks]
+        )[0]
+        lq_path, gt_path = random.choice(self.pairs[task])
         with Image.open(gt_path) as image:
             gt = np.array(image.convert("RGB"))
         if self.synthetic and task in ("denoise", "dejpeg"):
@@ -126,7 +126,10 @@ class IRTrainDataset(Dataset):
         gt, lq = np.pad(gt, pad, mode="symmetric"), np.pad(lq, pad, mode="symmetric")
 
         crop = min(600, gt.shape[0], gt.shape[1]) if task == "deshadow" else size
-        y, x = rng.randint(0, gt.shape[0] - crop), rng.randint(0, gt.shape[1] - crop)
+        y, x = (
+            random.randint(0, gt.shape[0] - crop),
+            random.randint(0, gt.shape[1] - crop),
+        )
         gt, lq = gt[y : y + crop, x : x + crop], lq[y : y + crop, x : x + crop]
         if crop != size:
             gt = np.array(
@@ -135,13 +138,13 @@ class IRTrainDataset(Dataset):
             lq = np.array(
                 Image.fromarray(lq).resize((size, size), Image.Resampling.BILINEAR)
             )
-        rotation, flip = rng.randrange(4), rng.randrange(2)
+        rotation, flip = random.randrange(4), random.randrange(2)
         gt, lq = np.rot90(gt, rotation), np.rot90(lq, rotation)
         if flip:
             gt, lq = gt[:, ::-1], lq[:, ::-1]
         if self.synthetic and task == "denoise":
-            sigma = rng.choice((15, 25, 50))
-            noise = np.random.default_rng(self.seed + index).normal(0, sigma, gt.shape)
+            sigma = random.choice((15, 25, 50))
+            noise = np.random.normal(0, sigma, gt.shape)
             lq = np.clip(gt.astype(np.float32) + noise, 0, 255).astype(np.uint8)
         elif self.synthetic and task == "dejpeg":
             with BytesIO() as buffer:

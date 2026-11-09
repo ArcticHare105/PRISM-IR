@@ -1,10 +1,20 @@
 import json
 from pathlib import Path
+import random
 
+import numpy as np
 import torch
 
 from src.open_clip.model import CLIP
 from src.open_clip.daclip_model import DaCLIP
+
+
+def set_seed(seed):
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def resolve_sd_path(path=None):

@@ -9,8 +9,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-import random
-
 import numpy as np
 from PIL import Image
 import torch
@@ -19,7 +17,7 @@ from torch.utils.data import DataLoader
 from diffusers.optimization import get_scheduler
 
 from src.my_utils.data_utils import discover, load_input
-from src.my_utils.utils import load_daclip, resolve_sd_path
+from src.my_utils.utils import load_daclip, resolve_sd_path, set_seed
 from src.my_utils.model_checks import (
     check_checkpoint,
     check_fresh_initialization,
@@ -33,73 +31,125 @@ from src.classify_model import proto_DegraCls
 from src.my_utils.training_utils import parse_args_paired_training
 
 
-def seed_all(seed):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+def check_resume_settings(saved_settings, settings):
+    saved_settings.setdefault("inference_timestep", 300)
+    saved_settings.setdefault("denoising_mode", "scheduler")
+    aliases = {
+        "train_batch_size": "batch_size",
+        "gradient_accumulation_steps": "gradient_accumulation",
+        "resolution": "patch_size",
+        "mixed_precision": "precision",
+    }
+    keys = (
+        "tasks",
+        "seed",
+        "train_batch_size",
+        "gradient_accumulation_steps",
+        "resolution",
+        "paired_noise_jpeg",
+        "mixed_precision",
+        "inference_timestep",
+        "denoising_mode",
+        "learning_rate",
+        "lr_scheduler",
+        "lr_warmup_steps",
+        "lr_num_cycles",
+        "lr_power",
+        "lambda_l1",
+        "lambda_lpips",
+        "lambda_cls",
+        "lambda_contra",
+        "use_contrastive_loss",
+        "lambda_gan",
+        "train_root",
+    )
+    for key in keys:
+        saved = saved_settings.get(key, saved_settings.get(aliases.get(key)))
+        if key == "mixed_precision" and saved == "fp32":
+            saved = "no"
+        if saved != settings[key]:
+            raise ValueError(f"Resume setting differs: {key}")
+
+
+def degradation_losses(
+    prediction, target, labels, vae_select, unet_select, classifier, lpips, args
+):
+    vae_cls, unet_cls, _, _ = classifier(vae_select, unet_select)
+    losses = {
+        "l1": F.l1_loss(prediction.float(), target.float()) * args.lambda_l1,
+        "cls": (
+            soft_target_ce_loss(vae_cls.float(), labels)
+            + soft_target_ce_loss(unet_cls.float(), labels)
+        )
+        * args.lambda_cls,
+    }
+    if args.lambda_lpips:
+        losses["lpips"] = (
+            lpips(prediction.float(), target.float()).mean() * args.lambda_lpips
+        )
+        losses["ssim"] = (
+            ssim_loss(prediction.float(), target.float()) * args.lambda_lpips
+        )
+    if args.use_contrastive_loss and args.lambda_contra:
+        losses["contra"] = (
+            contrastive_select_loss(vae_select.float(), len(args.tasks))
+            + contrastive_select_loss(unet_select.float(), len(args.tasks))
+        ) * args.lambda_contra
+    return losses
+
+
+def save_checkpoint(
+    directory,
+    step,
+    model,
+    classifier,
+    discriminator,
+    optimizer,
+    disc_optimizer,
+    scaler,
+    scheduler,
+    disc_scheduler,
+    settings,
+):
+    model_state = model.checkpoint_state()
+    torch.save(model_state, directory / f"model_{step}.pkl")
+    model.export_deg(directory / f"deg_model_{step}.pkl")
+    classifier.save_model(directory / f"proto_cls_{step}.pkl")
+    if discriminator:
+        torch.save(discriminator.decoder.state_dict(), directory / f"disc_{step}.pkl")
+    training_state = {
+        "step": step,
+        "model": model_state,
+        "prototypes": classifier.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "discriminator": discriminator.decoder.state_dict() if discriminator else None,
+        "disc_optimizer": disc_optimizer.state_dict() if disc_optimizer else None,
+        "scaler": scaler.state_dict(),
+        "lr_scheduler": scheduler.state_dict(),
+        "lr_scheduler_disc": disc_scheduler.state_dict() if disc_scheduler else None,
+        "settings": settings,
+    }
+    temporary = directory / "latest_resume.tmp"
+    torch.save(training_state, temporary)
+    temporary.replace(directory / "latest_resume.pt")
 
 
 def main(args):
     torch.set_num_threads(4)
     args.sd_path = resolve_sd_path(args.sd_path)
     device = torch.device(args.device)
-    if args.seed is not None:
-        seed_all(args.seed)
+    set_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoints = args.output_dir / "checkpoints"
     checkpoints.mkdir(exist_ok=True)
     settings = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
     resume = torch.load(args.resume, map_location="cpu") if args.resume else None
-    data_seed = (
-        resume["settings"]["data_seed"]
-        if resume and "data_seed" in resume["settings"]
-        else torch.initial_seed() % (2**32)
-    )
-    settings["data_seed"] = data_seed
     initial_checkpoint = None
     if resume:
-        resume["settings"].setdefault("inference_timestep", 300)
-        resume["settings"].setdefault("denoising_mode", "scheduler")
         initial_checkpoint = args.output_dir / "resume_initial_model.pkl"
         torch.save(resume["model"], initial_checkpoint)
-        aliases = {
-            "train_batch_size": "batch_size",
-            "gradient_accumulation_steps": "gradient_accumulation",
-            "resolution": "patch_size",
-            "mixed_precision": "precision",
-        }
-        for key in (
-            "tasks",
-            "seed",
-            "train_batch_size",
-            "gradient_accumulation_steps",
-            "resolution",
-            "paired_noise_jpeg",
-            "mixed_precision",
-            "inference_timestep",
-            "denoising_mode",
-            "learning_rate",
-            "lr_scheduler",
-            "lr_warmup_steps",
-            "lr_num_cycles",
-            "lr_power",
-            "lambda_l1",
-            "lambda_lpips",
-            "lambda_cls",
-            "lambda_contra",
-            "use_contrastive_loss",
-            "lambda_gan",
-            "train_root",
-        ):
-            saved = resume["settings"].get(
-                key, resume["settings"].get(aliases.get(key))
-            )
-            if key == "mixed_precision" and saved == "fp32":
-                saved = "no"
-            if saved != settings[key]:
-                raise ValueError(f"Resume setting differs: {key}")
-    net_sr = S3Diff(
+        check_resume_settings(resume["settings"], settings)
+    restoration_model = S3Diff(
         sd_path=str(args.sd_path),
         pretrained_path=initial_checkpoint,
         lora_rank_unet_deg=args.lora_rank_unet_deg,
@@ -110,17 +160,17 @@ def main(args):
         timestep=args.inference_timestep,
         denoising_mode=args.denoising_mode,
     )
-    net_sr.set_train()
+    restoration_model.set_train()
     structure = (
-        check_checkpoint(net_sr, initial_checkpoint)
+        check_checkpoint(restoration_model, initial_checkpoint)
         if resume
-        else check_fresh_initialization(net_sr)
+        else check_fresh_initialization(restoration_model)
     )
     for network in ("unet", "vae"):
         for adapter in ("deg", "vq"):
             name = f"lora_rank_{network}_{adapter}"
-            setattr(args, name, getattr(net_sr, name))
-            settings[name] = getattr(net_sr, name)
+            setattr(args, name, getattr(restoration_model, name))
+            settings[name] = getattr(restoration_model, name)
     settings["model"] = structure
     settings["initial_checkpoint"] = str(args.resume) if args.resume else None
     settings["base_model"] = str(args.sd_path)
@@ -143,26 +193,28 @@ def main(args):
     if args.check_only:
         return
     if args.gradient_checkpointing:
-        net_sr.unet.enable_gradient_checkpointing()
+        restoration_model.unet.enable_gradient_checkpointing()
     if args.enable_xformers_memory_efficient_attention:
-        net_sr.unet.enable_xformers_memory_efficient_attention()
+        restoration_model.unet.enable_xformers_memory_efficient_attention()
     if args.allow_tf32:
         torch.backends.cuda.matmul.allow_tf32 = True
-    net_proto_cls = proto_DegraCls(
-        net_sr.rank_vae, net_sr.rank_unet, class_num=len(args.tasks)
+    classifier = proto_DegraCls(
+        restoration_model.rank_vae,
+        restoration_model.rank_unet,
+        class_num=len(args.tasks),
     ).to(device)
 
     trainable = [
         p
         for module in (
-            net_sr.vae,
-            net_sr.unet,
-            net_sr.vae_selector,
-            net_sr.unet_selector,
+            restoration_model.vae,
+            restoration_model.unet,
+            restoration_model.vae_selector,
+            restoration_model.unet_selector,
         )
         for p in module.parameters()
         if p.requires_grad
-    ] + list(net_proto_cls.parameters())
+    ] + list(classifier.parameters())
     optimizer = torch.optim.AdamW(
         trainable,
         lr=args.learning_rate,
@@ -170,19 +222,19 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
-    net_daclip = load_daclip(args.daclip_path, args.device)
-    net_lpips = None
+    daclip = load_daclip(args.daclip_path, args.device)
+    lpips_model = None
     if args.lambda_lpips:
         from src.my_utils.utils import load_lpips
 
-        net_lpips = load_lpips(args.vgg_path, args.lpips_path, device)
-    net_disc, optimizer_disc = None, None
+        lpips_model = load_lpips(args.vgg_path, args.lpips_path, device)
+    discriminator, discriminator_optimizer = None, None
     if args.lambda_gan:
         from src.vision_aided_loss.cv_discriminator import CLIPDiscriminator
 
-        net_disc = CLIPDiscriminator(args.clip_path).to(device)
-        optimizer_disc = torch.optim.AdamW(
-            net_disc.decoder.parameters(),
+        discriminator = CLIPDiscriminator(args.clip_path).to(device)
+        discriminator_optimizer = torch.optim.AdamW(
+            discriminator.decoder.parameters(),
             lr=args.learning_rate,
             betas=(args.adam_beta1, args.adam_beta2),
             weight_decay=args.adam_weight_decay,
@@ -197,15 +249,17 @@ def main(args):
     lr_scheduler = get_scheduler(
         args.lr_scheduler, optimizer=optimizer, **scheduler_args
     )
-    lr_scheduler_disc = (
-        get_scheduler(args.lr_scheduler, optimizer=optimizer_disc, **scheduler_args)
-        if optimizer_disc
+    discriminator_scheduler = (
+        get_scheduler(
+            args.lr_scheduler, optimizer=discriminator_optimizer, **scheduler_args
+        )
+        if discriminator_optimizer
         else None
     )
     scaler = torch.cuda.amp.GradScaler(enabled=args.mixed_precision == "fp16")
     start_step = 0
     if resume:
-        net_proto_cls.load_state_dict(resume["prototypes"], strict=True)
+        classifier.load_state_dict(resume["prototypes"], strict=True)
         optimizer.load_state_dict(resume["optimizer"])
         for parameter, state in optimizer.state.items():
             for key in ("exp_avg", "exp_avg_sq"):
@@ -213,19 +267,15 @@ def main(args):
                     raise ValueError(
                         f"Optimizer parameter shape mismatch: {state[key].shape} vs {parameter.shape}"
                     )
-        if net_disc:
-            net_disc.decoder.load_state_dict(resume["discriminator"], strict=True)
-            optimizer_disc.load_state_dict(resume["disc_optimizer"])
+        if discriminator:
+            discriminator.decoder.load_state_dict(resume["discriminator"], strict=True)
+            discriminator_optimizer.load_state_dict(resume["disc_optimizer"])
         scaler.load_state_dict(resume["scaler"])
         if "lr_scheduler" in resume:
             lr_scheduler.load_state_dict(resume["lr_scheduler"])
-        if lr_scheduler_disc and resume.get("lr_scheduler_disc"):
-            lr_scheduler_disc.load_state_dict(resume["lr_scheduler_disc"])
+        if discriminator_scheduler and resume.get("lr_scheduler_disc"):
+            discriminator_scheduler.load_state_dict(resume["lr_scheduler_disc"])
         start_step = resume["step"]
-        random.setstate(resume["rng_python"])
-        np.random.set_state(resume["rng_numpy"])
-        torch.set_rng_state(resume["rng_torch"])
-        torch.cuda.set_rng_state_all(resume["rng_cuda"])
         del resume
     if start_step >= args.max_train_steps:
         raise ValueError("--max-steps must exceed the resumed step")
@@ -234,21 +284,18 @@ def main(args):
         dataroot=str(args.train_root),
         de_type=args.tasks,
         patch_size=args.resolution,
-        seed=data_seed,
         samples=args.max_train_steps
         * args.train_batch_size
         * args.gradient_accumulation_steps,
         limit_per_task=args.limit_per_task,
         synthetic_noise_jpeg=not args.paired_noise_jpeg,
     )
-    dataset_train = IRTrainDataset(dataset_opt)
-    dataset = dataset_train
+    dataset = IRTrainDataset(dataset_opt)
     counts = {task: len(pairs) for task, pairs in dataset.pairs.items()}
     (args.output_dir / "dataset_summary.json").write_text(
         json.dumps(counts, indent=2) + "\n"
     )
     print("Training pairs:", counts, flush=True)
-    loader_generator = torch.Generator().manual_seed(data_seed)
     loader = iter(
         DataLoader(
             dataset,
@@ -258,7 +305,6 @@ def main(args):
                 len(dataset),
             ),
             num_workers=args.dataloader_num_workers,
-            generator=loader_generator,
         )
     )
     mean = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device)[
@@ -285,7 +331,7 @@ def main(args):
             features = F.interpolate(
                 image * 0.5 + 0.5, (224, 224), mode="bilinear", align_corners=True
             )
-            image_context, degradation_context, _ = net_daclip.encode_image(
+            image_context, degradation_context, _ = daclip.encode_image(
                 (features - mean) / std, control=True
             )
         return image_context.float(), degradation_context.float()
@@ -309,12 +355,12 @@ def main(args):
             )
             batches.append((batch, image_context, degradation_context))
         stats, fake_batches = {}, []
-        net_sr.train()
-        net_sr.text_encoder.eval()
+        restoration_model.train()
+        restoration_model.text_encoder.eval()
         for phase in ("deg", "vq"):
-            net_sr.set_lora(classify=(phase == "deg"))
-            if net_disc:
-                net_disc.decoder.requires_grad_(False)
+            restoration_model.set_lora(classify=(phase == "deg"))
+            if discriminator:
+                discriminator.decoder.requires_grad_(False)
             optimizer.zero_grad(set_to_none=True)
             for batch, image_context, degradation_context in batches:
                 image, target, labels = (
@@ -324,7 +370,7 @@ def main(args):
                 )
                 with amp():
                     if phase == "deg":
-                        prediction, vae_select, unet_select = net_sr(
+                        prediction, vae_select, unet_select = restoration_model(
                             image,
                             image_context,
                             degradation_context,
@@ -332,7 +378,7 @@ def main(args):
                             classify=True,
                         )
                     else:
-                        prediction = net_sr(
+                        prediction = restoration_model(
                             image,
                             image_context,
                             degradation_context,
@@ -340,43 +386,24 @@ def main(args):
                         )
                         vae_select = unet_select = None
                     if phase == "deg":
-                        vae_cls, unet_cls, _, _ = net_proto_cls(vae_select, unet_select)
-                        terms = {
-                            "l1": F.l1_loss(prediction.float(), target.float())
-                            * args.lambda_l1,
-                            "cls": (
-                                soft_target_ce_loss(vae_cls.float(), labels)
-                                + soft_target_ce_loss(unet_cls.float(), labels)
-                            )
-                            * args.lambda_cls,
-                        }
-                        if args.lambda_lpips:
-                            terms["lpips"] = (
-                                net_lpips(prediction.float(), target.float()).mean()
-                                * args.lambda_lpips
-                            )
-                        if args.lambda_lpips:
-                            terms["ssim"] = (
-                                ssim_loss(prediction.float(), target.float())
-                                * args.lambda_lpips
-                            )
-                        if args.use_contrastive_loss and args.lambda_contra:
-                            terms["contra"] = (
-                                contrastive_select_loss(
-                                    vae_select.float(), len(args.tasks)
-                                )
-                                + contrastive_select_loss(
-                                    unet_select.float(), len(args.tasks)
-                                )
-                            ) * args.lambda_contra
+                        terms = degradation_losses(
+                            prediction,
+                            target,
+                            labels,
+                            vae_select,
+                            unet_select,
+                            classifier,
+                            lpips_model,
+                            args,
+                        )
                     else:
                         terms = {
                             "vq_l1": F.l1_loss(prediction.float(), target.float())
                             * args.lambda_l1
                         }
-                        if net_disc:
+                        if discriminator:
                             terms["gan_g"] = (
-                                net_disc(prediction, for_G=True) * args.lambda_gan
+                                discriminator(prediction, for_G=True) * args.lambda_gan
                             )
                         fake_batches.append(prediction.detach().cpu())
                     loss = sum(terms.values()) / args.gradient_accumulation_steps
@@ -389,12 +416,12 @@ def main(args):
                         + float(value.detach()) / args.gradient_accumulation_steps
                     )
                 del loss, terms, prediction, vae_select, unet_select
-            check_gradients(net_sr, phase)
+            check_gradients(restoration_model, phase)
             update(optimizer, trainable)
-        if net_disc:
-            net_disc.decoder.requires_grad_(True)
+        if discriminator:
+            discriminator.decoder.requires_grad_(True)
             for real in (True, False):
-                optimizer_disc.zero_grad(set_to_none=True)
+                discriminator_optimizer.zero_grad(set_to_none=True)
                 for i, (batch, _, _) in enumerate(batches):
                     with amp():
                         image = (
@@ -403,17 +430,19 @@ def main(args):
                             else fake_batches[i].to(device)
                         )
                         loss = (
-                            net_disc(image, for_real=real)
+                            discriminator(image, for_real=real)
                             * args.lambda_gan
                             / args.gradient_accumulation_steps
                         )
                     scaler.scale(loss).backward()
                     name = "gan_d_real" if real else "gan_d_fake"
                     stats[name] = stats.get(name, 0.0) + float(loss.detach())
-                update(optimizer_disc, list(net_disc.decoder.parameters()))
+                update(
+                    discriminator_optimizer, list(discriminator.decoder.parameters())
+                )
         lr_scheduler.step()
-        if lr_scheduler_disc:
-            lr_scheduler_disc.step()
+        if discriminator_scheduler:
+            discriminator_scheduler.step()
         row = {
             "step": step,
             **stats,
@@ -426,40 +455,23 @@ def main(args):
             flush=True,
         )
         if args.eval_freq and (step - 1) % args.eval_freq == 0:
-            validate(net_sr, context, args, step, amp, device)
+            validate(restoration_model, context, args, step, amp, device)
         if step == args.max_train_steps or (
             args.checkpointing_steps and (step - 1) % args.checkpointing_steps == 0
         ):
-            state = net_sr.checkpoint_state()
-            torch.save(state, checkpoints / f"model_{step}.pkl")
-            net_sr.export_deg(checkpoints / f"deg_model_{step}.pkl")
-            net_proto_cls.save_model(checkpoints / f"proto_cls_{step}.pkl")
-            if net_disc:
-                torch.save(
-                    net_disc.decoder.state_dict(), checkpoints / f"disc_{step}.pkl"
-                )
-            training_state = {
-                "step": step,
-                "model": state,
-                "prototypes": net_proto_cls.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "discriminator": net_disc.decoder.state_dict() if net_disc else None,
-                "disc_optimizer": optimizer_disc.state_dict() if net_disc else None,
-                "scaler": scaler.state_dict(),
-                "lr_scheduler": lr_scheduler.state_dict(),
-                "lr_scheduler_disc": lr_scheduler_disc.state_dict()
-                if lr_scheduler_disc
-                else None,
-                "settings": settings,
-                "rng_python": random.getstate(),
-                "rng_numpy": np.random.get_state(),
-                "rng_torch": torch.get_rng_state(),
-                "rng_cuda": torch.cuda.get_rng_state_all(),
-            }
-            temp = checkpoints / "latest_resume.tmp"
-            torch.save(training_state, temp)
-            temp.replace(checkpoints / "latest_resume.pt")
-            del state, training_state
+            save_checkpoint(
+                checkpoints,
+                step,
+                restoration_model,
+                classifier,
+                discriminator,
+                optimizer,
+                discriminator_optimizer,
+                scaler,
+                lr_scheduler,
+                discriminator_scheduler,
+                settings,
+            )
             print(
                 f"Saved full deg+vq, deg-only and resumable checkpoints at step {step}",
                 flush=True,
@@ -470,17 +482,14 @@ def main(args):
 
 
 @torch.no_grad()
-def validate(net_sr, context, args, step, amp, device):
+def validate(restoration_model, context, args, step, amp, device):
     folder = args.output_dir / "validation" / f"step_{step}"
     folder.mkdir(parents=True, exist_ok=True)
 
-    rng_cpu, rng_cuda = torch.get_rng_state(), torch.cuda.get_rng_state_all()
-    net_sr.eval()
-    net_sr.set_lora(classify=(args.validation_mode == "deg"))
+    restoration_model.eval()
+    restoration_model.set_lora(classify=(args.validation_mode == "deg"))
     rows = []
     try:
-        if args.seed is not None:
-            torch.manual_seed(args.seed)
         samples = discover(None, args.val_root, folder, args.tasks, 1)
         for sample in samples:
             image, size = load_input(sample.source)
@@ -494,7 +503,7 @@ def validate(net_sr, context, args, step, amp, device):
             )
             with amp():
                 image_context, degradation_context = context(image)
-                pred = net_sr(
+                pred = restoration_model(
                     image, image_context, degradation_context, [args.pos_prompt]
                 ).float()
             mse = F.mse_loss(pred * 0.5 + 0.5, gt * 0.5 + 0.5).item()
@@ -523,10 +532,8 @@ def validate(net_sr, context, args, step, amp, device):
             + "\n"
         )
     finally:
-        torch.set_rng_state(rng_cpu)
-        torch.cuda.set_rng_state_all(rng_cuda)
-        net_sr.train()
-        net_sr.text_encoder.eval()
+        restoration_model.train()
+        restoration_model.text_encoder.eval()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from torch.utils.data import Dataset
 
-from src.my_utils.data_utils import TASKS, Sample, discover, load_input, validate_samples
+from src.my_utils.data_utils import (
+    TASKS,
+    Sample,
+    discover,
+    load_input,
+    validate_samples,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 

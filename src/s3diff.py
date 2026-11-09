@@ -32,6 +32,25 @@ def Round_Sigmoid_Gumbel(logits, tau=1, hard=False, deterministic=False):
     return ret
 
 
+def add_restoration_adapters(network, name, deg_rank, vq_rank, target_modules, load_vq):
+    adapters = [f"{name}_deg"]
+    network.add_adapter(
+        LoraConfig(
+            r=deg_rank, init_lora_weights="gaussian", target_modules=target_modules
+        ),
+        adapter_name=adapters[0],
+    )
+    if load_vq:
+        adapters.append(f"{name}_vq")
+        network.add_adapter(
+            LoraConfig(
+                r=vq_rank, init_lora_weights="gaussian", target_modules=target_modules
+            ),
+            adapter_name=adapters[1],
+        )
+    network.set_adapter(adapters)
+
+
 class S3Diff(torch.nn.Module):
     def __init__(
         self,
@@ -173,38 +192,26 @@ class S3Diff(torch.nn.Module):
         self._linear_initialize_weights()
 
         if pretrained_path is not None:
-            vae_deg_lora_config = LoraConfig(
-                r=sd["rank_vae_deg"],
-                init_lora_weights="gaussian",
-                target_modules=sd["vae_lora_target_modules"],
+            add_restoration_adapters(
+                vae,
+                "vae",
+                sd["rank_vae_deg"],
+                lora_rank_vae_vq,
+                sd["vae_lora_target_modules"],
+                load_vq,
             )
-            vae.add_adapter(vae_deg_lora_config, adapter_name="vae_deg")
-            if load_vq:
-                vae_vq_lora_config = LoraConfig(
-                    r=sd["rank_vae_vq"],
-                    init_lora_weights="gaussian",
-                    target_modules=sd["vae_lora_target_modules"],
-                )
-                vae.add_adapter(vae_vq_lora_config, adapter_name="vae_vq")
-            vae.set_adapter(["vae_deg", "vae_vq"] if load_vq else ["vae_deg"])
             load_restoration_state(
                 vae, sd["state_dict_vae"], lambda k: "lora" in k or "skip_conv" in k
             )
 
-            unet_deg_lora_config = LoraConfig(
-                r=sd["rank_unet_deg"],
-                init_lora_weights="gaussian",
-                target_modules=sd["unet_lora_target_modules"],
+            add_restoration_adapters(
+                unet,
+                "unet",
+                sd["rank_unet_deg"],
+                lora_rank_unet_vq,
+                sd["unet_lora_target_modules"],
+                load_vq,
             )
-            unet.add_adapter(unet_deg_lora_config, adapter_name="unet_deg")
-            if load_vq:
-                unet_vq_lora_config = LoraConfig(
-                    r=sd["rank_unet_vq"],
-                    init_lora_weights="gaussian",
-                    target_modules=sd["unet_lora_target_modules"],
-                )
-                unet.add_adapter(unet_vq_lora_config, adapter_name="unet_vq")
-            unet.set_adapter(["unet_deg", "unet_vq"] if load_vq else ["unet_deg"])
             load_restoration_state(
                 unet,
                 sd["state_dict_unet"],
@@ -227,35 +234,23 @@ class S3Diff(torch.nn.Module):
             torch.nn.init.constant_(vae.decoder.skip_conv_3.weight, 1e-5)
             torch.nn.init.constant_(vae.decoder.skip_conv_4.weight, 1e-5)
 
-            vae_deg_lora_config = LoraConfig(
-                r=lora_rank_vae_deg,
-                init_lora_weights="gaussian",
-                target_modules=target_modules_vae,
+            add_restoration_adapters(
+                vae,
+                "vae",
+                lora_rank_vae_deg,
+                lora_rank_vae_vq,
+                target_modules_vae,
+                load_vq,
             )
-            vae.add_adapter(vae_deg_lora_config, adapter_name="vae_deg")
-            if load_vq:
-                vae_vq_lora_config = LoraConfig(
-                    r=lora_rank_vae_vq,
-                    init_lora_weights="gaussian",
-                    target_modules=target_modules_vae,
-                )
-                vae.add_adapter(vae_vq_lora_config, adapter_name="vae_vq")
-            vae.set_adapter(["vae_deg", "vae_vq"] if load_vq else ["vae_deg"])
 
-            unet_deg_lora_config = LoraConfig(
-                r=lora_rank_unet_deg,
-                init_lora_weights="gaussian",
-                target_modules=target_modules_unet,
+            add_restoration_adapters(
+                unet,
+                "unet",
+                lora_rank_unet_deg,
+                lora_rank_unet_vq,
+                target_modules_unet,
+                load_vq,
             )
-            unet.add_adapter(unet_deg_lora_config, adapter_name="unet_deg")
-            if load_vq:
-                unet_vq_lora_config = LoraConfig(
-                    r=lora_rank_unet_vq,
-                    init_lora_weights="gaussian",
-                    target_modules=target_modules_unet,
-                )
-                unet.add_adapter(unet_vq_lora_config, adapter_name="unet_vq")
-            unet.set_adapter(["unet_deg", "unet_vq"] if load_vq else ["unet_deg"])
 
         self.lora_rank_unet_deg = lora_rank_unet_deg
         self.lora_rank_vae_deg = lora_rank_vae_deg
@@ -349,23 +344,13 @@ class S3Diff(torch.nn.Module):
     def set_lora(self, classify):
         if not classify and not self.load_vq:
             raise ValueError("VQ is disabled in the deg-only test model")
-        if classify:
-            self.vae.set_adapter(["vae_deg"])
-            self.unet.set_adapter(["unet_deg"])
+        for name, network in (("vae", self.vae), ("unet", self.unet)):
+            adapters = [f"{name}_deg"]
+            if not classify:
+                adapters.append(f"{name}_vq")
+            network.set_adapter(adapters)
             self.change_weights_requires_grad(
-                self.vae, requires_grad=True, pattern_match_name="vae_deg"
-            )
-            self.change_weights_requires_grad(
-                self.unet, requires_grad=True, pattern_match_name="unet_deg"
-            )
-        else:
-            self.vae.set_adapter(["vae_deg", "vae_vq"])
-            self.unet.set_adapter(["unet_deg", "unet_vq"])
-            self.change_weights_requires_grad(
-                self.vae, requires_grad=False, pattern_match_name="vae_deg"
-            )
-            self.change_weights_requires_grad(
-                self.unet, requires_grad=False, pattern_match_name="unet_deg"
+                network, requires_grad=classify, pattern_match_name=f"{name}_deg"
             )
 
     def change_weights_requires_grad(self, model, requires_grad, pattern_match_name):
@@ -428,8 +413,7 @@ class S3Diff(torch.nn.Module):
 
         if classify:
             return output_image, torch.sigmoid(vae_logits), torch.sigmoid(unet_logits)
-        else:
-            return output_image
+        return output_image
 
     def checkpoint_state(self):
         sd = {}

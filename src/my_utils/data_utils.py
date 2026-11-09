@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from pathlib import Path
-import zlib
 
 import numpy as np
 from PIL import Image
@@ -136,7 +135,3 @@ def load_input(path):
         .unsqueeze(0)
     )
     return tensor, (height, width)
-
-
-def image_seed(base, relative_path):
-    return (base + zlib.crc32(str(relative_path).encode())) % (2**32)

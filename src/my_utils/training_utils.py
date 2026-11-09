@@ -154,6 +154,7 @@ def parse_args_paired_training(input_args=None):
     config = OmegaConf.to_container(OmegaConf.load(known.base_config), resolve=True)
     defaults = dict(config["train_options"])
     defaults.update(config["model_options"])
+    defaults["seed"] = config.get("seed", defaults.get("seed"))
     defaults.setdefault(
         "validation_mode",
         "deg_vq" if config["test_options"].get("use_vq", False) else "deg",

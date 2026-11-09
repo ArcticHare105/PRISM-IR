@@ -1,4 +1,5 @@
 name: PRISM_IR_3task
+seed: 42
 
 model_options:
   lora_rank_unet_deg: 64
@@ -30,7 +31,6 @@ train_options:
   enable_xformers_memory_efficient_attention: true
   dataloader_num_workers: 0
   mixed_precision: "no"
-  seed: null
   checkpointing_steps: 500
   eval_freq: 100
   lambda_l1: 2.0
@@ -47,4 +47,3 @@ test_options:
   mixed_precision: "no"
   tile_size: 512
   tile_overlap: 128
-  seed: 42

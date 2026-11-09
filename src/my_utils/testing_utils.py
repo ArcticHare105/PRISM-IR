@@ -13,7 +13,9 @@ def parse_args_paired_testing(input_args=None):
     parser = argparse.ArgumentParser(
         description="Test the S3Diff image-restoration branch"
     )
-    parser.add_argument("--base_config", type=Path, default=ROOT / "configs/ir_10task.yaml")
+    parser.add_argument(
+        "--base_config", type=Path, default=ROOT / "configs/ir_10task.yaml"
+    )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--input", type=Path)
     group.add_argument("--all-in-one", action="store_true")
@@ -111,6 +113,7 @@ def parse_args_paired_testing(input_args=None):
     config = OmegaConf.to_container(OmegaConf.load(known.base_config), resolve=True)
     defaults = dict(config.get("model_options", {}))
     defaults.update(config["test_options"])
+    defaults["seed"] = config.get("seed", defaults.get("seed"))
     for key in ("output_dir", "pretrained_path", "sd_path", "daclip_path"):
         if key == "sd_path" and defaults.get(key) is None:
             continue

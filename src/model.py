@@ -26,18 +26,15 @@ def soft_target_ce_loss(logits, target, num_classes=None):
 
 
 def contrastive_select_loss(select_vec, class_num):
-    B, L = select_vec.shape
-
-    k = L // class_num
+    feature_dim = select_vec.shape[1]
+    k = feature_dim // class_num
     topk_values, _ = torch.topk(select_vec, k, dim=1)
     topk_mean = topk_values.mean(dim=1)
 
     bottomk_values, _ = torch.topk(-select_vec, k * 2, dim=1)
     bottomk_mean = -bottomk_values.mean(dim=1)
 
-    loss = 1.0 + (bottomk_mean - topk_mean).mean()
-
-    return loss
+    return 1.0 + (bottomk_mean - topk_mean).mean()
 
 
 def ssim_loss(img1, img2, window_size=11, size_average=True):
@@ -87,12 +84,9 @@ def ssim_loss(img1, img2, window_size=11, size_average=True):
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / (
         (mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)
     )
-    ssim_loss_value = 1 - ssim_map.mean()
-
     if size_average:
-        return ssim_loss_value
-    else:
-        return 1 - ssim_map.mean([1, 2, 3])
+        return 1 - ssim_map.mean()
+    return 1 - ssim_map.mean([1, 2, 3])
 
 
 def my_vae_encoder_fwd(self, sample):
