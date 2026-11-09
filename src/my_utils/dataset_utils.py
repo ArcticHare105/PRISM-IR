@@ -1,4 +1,3 @@
-"""Task-weighted all_in_one training pairs; validation is never used for training."""
 from io import BytesIO
 from pathlib import Path
 import random
@@ -13,8 +12,18 @@ from src.my_utils.data_utils import TASKS, images
 ROOT = Path(__file__).resolve().parents[2]
 
 
-TASK_WEIGHTS = {"denoise": 1, "derain": 7, "deraindrop": 5, "dehaze": 5, "deblur": 8,
-                "delowlight": 3, "desnow": 3, "deshadow": 3, "dejpeg": 2, "inpaint": 3}
+TASK_WEIGHTS = {
+    "denoise": 1,
+    "derain": 7,
+    "deraindrop": 5,
+    "dehaze": 5,
+    "deblur": 8,
+    "delowlight": 3,
+    "desnow": 3,
+    "deshadow": 3,
+    "dejpeg": 2,
+    "inpaint": 3,
+}
 
 
 def find_gt(path, lq_root, gt_root, task):
@@ -29,7 +38,11 @@ def find_gt(path, lq_root, gt_root, task):
         stem = stem[:-5] + "_clean"
     elif task == "deshadow":
         stem += "_no_shadow"
-    matches = [p for p in (gt_root / relative.parent).glob(stem + ".*") if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}]
+    matches = [
+        p
+        for p in (gt_root / relative.parent).glob(stem + ".*")
+        if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+    ]
     if len(matches) != 1:
         raise FileNotFoundError(f"Expected exactly one GT for {path}, got {matches}")
     return matches[0]
@@ -37,14 +50,14 @@ def find_gt(path, lq_root, gt_root, task):
 
 class IRTrainDataset(Dataset):
     def __init__(self, dataset_opt):
-        root = dataset_opt.get('dataroot', ROOT)
-        tasks = dataset_opt['de_type']
-        patch_size = dataset_opt.get('patch_size', 256)
-        seed = dataset_opt.get('seed', 42)
-        samples = dataset_opt.get('samples', 10000)
-        limit = dataset_opt.get('limit_per_task', 0)
-        synthetic_noise_jpeg = dataset_opt.get('synthetic_noise_jpeg', True)
-        label_smoothing = dataset_opt.get('label_smooth', 0.1)
+        root = dataset_opt.get("dataroot", ROOT)
+        tasks = dataset_opt["de_type"]
+        patch_size = dataset_opt.get("patch_size", 256)
+        seed = dataset_opt.get("seed", 42)
+        samples = dataset_opt.get("samples", 10000)
+        limit = dataset_opt.get("limit_per_task", 0)
+        synthetic_noise_jpeg = dataset_opt.get("synthetic_noise_jpeg", True)
+        label_smoothing = dataset_opt.get("label_smooth", 0.1)
         self.dataset_opt = dataset_opt
         self.root, self.tasks = Path(root), tasks
         self.patch_size, self.seed, self.samples = patch_size, seed, samples
@@ -63,9 +76,16 @@ class IRTrainDataset(Dataset):
                         if not line.strip():
                             continue
                         lq, gt = line.split("|")
-                        lq, gt = Path(lq.strip()) if lq.strip() else Path(gt.strip()), Path(gt.strip())
-                        if not gt.is_file() or (not lq.is_file() and task not in ("denoise", "dejpeg")):
-                            raise FileNotFoundError(f"Missing training pair: {lq} | {gt}")
+                        lq, gt = (
+                            Path(lq.strip()) if lq.strip() else Path(gt.strip()),
+                            Path(gt.strip()),
+                        )
+                        if not gt.is_file() or (
+                            not lq.is_file() and task not in ("denoise", "dejpeg")
+                        ):
+                            raise FileNotFoundError(
+                                f"Missing training pair: {lq} | {gt}"
+                            )
                         pairs.append((lq, gt))
                 self.pairs[task] = pairs[:limit] if limit else pairs
                 if not self.pairs[task]:
@@ -97,18 +117,24 @@ class IRTrainDataset(Dataset):
             with Image.open(lq_path) as image:
                 lq = np.array(image.convert("RGB"))
         if lq.shape != gt.shape:
-            raise ValueError(f"Training pair size mismatch: {lq_path} {lq.shape}, {gt_path} {gt.shape}")
+            raise ValueError(
+                f"Training pair size mismatch: {lq_path} {lq.shape}, {gt_path} {gt.shape}"
+            )
         height, width = gt.shape[:2]
         size = self.patch_size
         pad = ((0, max(0, size - height)), (0, max(0, size - width)), (0, 0))
         gt, lq = np.pad(gt, pad, mode="symmetric"), np.pad(lq, pad, mode="symmetric")
-        # The original deshadow loader crops up to 600 pixels and resizes.
+
         crop = min(600, gt.shape[0], gt.shape[1]) if task == "deshadow" else size
         y, x = rng.randint(0, gt.shape[0] - crop), rng.randint(0, gt.shape[1] - crop)
-        gt, lq = gt[y:y + crop, x:x + crop], lq[y:y + crop, x:x + crop]
+        gt, lq = gt[y : y + crop, x : x + crop], lq[y : y + crop, x : x + crop]
         if crop != size:
-            gt = np.array(Image.fromarray(gt).resize((size, size), Image.Resampling.BILINEAR))
-            lq = np.array(Image.fromarray(lq).resize((size, size), Image.Resampling.BILINEAR))
+            gt = np.array(
+                Image.fromarray(gt).resize((size, size), Image.Resampling.BILINEAR)
+            )
+            lq = np.array(
+                Image.fromarray(lq).resize((size, size), Image.Resampling.BILINEAR)
+            )
         rotation, flip = rng.randrange(4), rng.randrange(2)
         gt, lq = np.rot90(gt, rotation), np.rot90(lq, rotation)
         if flip:
@@ -123,9 +149,23 @@ class IRTrainDataset(Dataset):
                 buffer.seek(0)
                 with Image.open(buffer) as image:
                     lq = np.array(image.convert("RGB"))
+
         def tensor(array):
-            return torch.from_numpy(array.copy()).permute(2, 0, 1).float().div(127.5).sub(1)
-        label = torch.full((len(TASKS),), self.smoothing / len(TASKS))
-        label[list(TASKS).index(task)] += 1 - self.smoothing
-        return {"degrad_patch": tensor(lq), "clean_patch": tensor(gt), "de_label": label, "degra": task,
-                "input": str(lq_path), "reference": str(gt_path)}
+            return (
+                torch.from_numpy(array.copy())
+                .permute(2, 0, 1)
+                .float()
+                .div(127.5)
+                .sub(1)
+            )
+
+        label = torch.full((len(self.tasks),), self.smoothing / len(self.tasks))
+        label[self.tasks.index(task)] += 1 - self.smoothing
+        return {
+            "degrad_patch": tensor(lq),
+            "clean_patch": tensor(gt),
+            "de_label": label,
+            "degra": task,
+            "input": str(lq_path),
+            "reference": str(gt_path),
+        }

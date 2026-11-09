@@ -1,11 +1,10 @@
 import hashlib
 import os
-import urllib
+import torch
 import warnings
 from functools import partial
 from typing import Dict, Union
 
-from tqdm import tqdm
 
 from .version import __version__
 
@@ -361,18 +360,15 @@ def download_pretrained_from_url(
         else:
             return download_target
 
-    with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
-        with tqdm(total=int(source.headers.get("Content-Length")), ncols=80, unit='iB', unit_scale=True) as loop:
-            while True:
-                buffer = source.read(8192)
-                if not buffer:
-                    break
-
-                output.write(buffer)
-                loop.update(len(buffer))
-
-    if expected_sha256 and not hashlib.sha256(open(download_target, "rb").read()).hexdigest().startswith(expected_sha256):
-        raise RuntimeError(f"Model has been downloaded but the SHA256 checksum does not not match")
+    for attempt in range(3):
+        try:
+            torch.hub.download_url_to_file(
+                url, download_target, hash_prefix=expected_sha256 or None, progress=True,
+            )
+            break
+        except (OSError, RuntimeError):
+            if attempt == 2:
+                raise
 
     return download_target
 

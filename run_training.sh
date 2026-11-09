@@ -6,6 +6,4 @@ if [[ -n "${PYTHON_BIN:-}" ]]; then
 else
     python_exec=python
 fi
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-exec "$python_exec" "$SCRIPT_DIR/src/train_s3diff.py" "$@"
+exec "$python_exec" "$SCRIPT_DIR/train.py" "$@"

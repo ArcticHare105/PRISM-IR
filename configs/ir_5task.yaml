@@ -1,0 +1,50 @@
+name: PRISM_IR_5task
+
+model_options:
+  lora_rank_unet_deg: 64
+  lora_rank_vae_deg: 48
+  lora_rank_unet_vq: 8
+  lora_rank_vae_vq: 4
+  inference_timestep: 300
+  denoising_mode: scheduler
+
+datasets:
+  train:
+    dataroot: /path/to/datasets/all_in_one/train
+    de_type: [denoise, derain, dehaze, delowlight, deblur]
+    patch_size: 256
+    label_smooth: 0.1
+  val:
+    dataroot: /path/to/datasets/all_in_one/val
+
+train_options:
+  output_dir: training_output_5task
+  sd_path: null
+  daclip_path: /path/to/pretrained/daclip_5_tasks.pt
+  train_batch_size: 16
+  max_train_steps: 100000
+  learning_rate: 0.0001
+  lr_scheduler: cosine
+  gradient_accumulation_steps: 1
+  gradient_checkpointing: false
+  enable_xformers_memory_efficient_attention: true
+  dataloader_num_workers: 0
+  mixed_precision: "no"
+  seed: null
+  checkpointing_steps: 500
+  eval_freq: 100
+  lambda_l1: 2.0
+  lambda_lpips: 5.0
+  lambda_cls: 0.5
+  lambda_gan: 0.3
+
+test_options:
+  output_dir: outputs_5task
+  pretrained_path: checkpoints/model_5_tasks.pkl
+  use_vq: true
+  sd_path: null
+  daclip_path: /path/to/pretrained/daclip_5_tasks.pt
+  mixed_precision: "no"
+  tile_size: 512
+  tile_overlap: 128
+  seed: 42

@@ -63,7 +63,10 @@ class DaCLIP(nn.Module):
             text: Optional[torch.Tensor] = None,
     ):
         (caption, degradation) = text.chunk(2, dim=-1) if text is not None else (None, None)
-        image_features, image_degra_features = self.encode_image(image, control=True, normalize=True) if image is not None else None
+        image_features, image_degra_features, _ = (
+            self.encode_image(image, control=True, normalize=True)
+            if image is not None else (None, None, None)
+        )
         text_features = self.encode_text(caption, normalize=True) if text is not None else None
         text_degra_features = self.encode_text(degradation, normalize=True) if degradation is not None else None
 

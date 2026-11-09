@@ -1,4 +1,3 @@
-"""File discovery and preprocessing for restoration tests."""
 from dataclasses import dataclass
 from pathlib import Path
 import zlib
@@ -9,9 +8,15 @@ import torch
 
 
 TASKS = {
-    "denoise": "noisy", "derain": "rainy", "dehaze": "hazy",
-    "delowlight": "low-light", "deblur": "motion-blurry", "desnow": "snowy",
-    "deraindrop": "raindrop", "deshadow": "shadowed", "dejpeg": "jpeg-compressed",
+    "denoise": "noisy",
+    "derain": "rainy",
+    "dehaze": "hazy",
+    "delowlight": "low-light",
+    "deblur": "motion-blurry",
+    "desnow": "snowy",
+    "deraindrop": "raindrop",
+    "deshadow": "shadowed",
+    "dejpeg": "jpeg-compressed",
     "inpaint": "uncompleted",
 }
 EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
@@ -26,7 +31,9 @@ class Sample:
 
 
 def images(root):
-    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in EXTENSIONS)
+    return sorted(
+        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in EXTENSIONS
+    )
 
 
 def matching_reference(source, lq_root, gt_root):
@@ -34,13 +41,38 @@ def matching_reference(source, lq_root, gt_root):
     exact = gt_root / relative
     if exact.is_file():
         return exact
-    matches = [p for p in exact.parent.glob(relative.stem + ".*") if p.suffix.lower() in EXTENSIONS]
-    # ISTD/deshadow GTs in all_in_one use *_free.png, unlike their LQ names.
+    matches = [
+        p
+        for p in exact.parent.glob(relative.stem + ".*")
+        if p.suffix.lower() in EXTENSIONS
+    ]
+
     if not matches and gt_root.parent.name == "shadowed":
-        matches = [p for p in exact.parent.glob(relative.stem + "_free.*") if p.suffix.lower() in EXTENSIONS]
+        matches = [
+            p
+            for p in exact.parent.glob(relative.stem + "_free.*")
+            if p.suffix.lower() in EXTENSIONS
+        ]
     if len(matches) != 1:
         raise FileNotFoundError(f"Expected one GT image for {source}, found {matches}")
     return matches[0]
+
+
+def validate_samples(records):
+    if not records:
+        raise ValueError("No input images found")
+    outputs = [sample.output.resolve() for sample in records]
+    if len(outputs) != len(set(outputs)):
+        raise ValueError("Input images map to duplicate PNG output paths")
+    inputs = {
+        path.resolve()
+        for sample in records
+        for path in (sample.source, sample.reference)
+        if path is not None
+    }
+    if any(path in inputs for path in outputs):
+        raise ValueError("Output path must differ from all input and GT paths")
+    return records
 
 
 def discover(input_path, dataset_root, output, tasks, limit, gt_dir=None):
@@ -55,7 +87,13 @@ def discover(input_path, dataset_root, output, tasks, limit, gt_dir=None):
             paths = paths[:limit]
         for p in paths:
             reference = matching_reference(p, lq_root, Path(gt_dir)) if gt_dir else None
-            records.append(Sample(p, output / p.relative_to(lq_root).with_suffix(".png"), reference=reference))
+            records.append(
+                Sample(
+                    p,
+                    output / p.relative_to(lq_root).with_suffix(".png"),
+                    reference=reference,
+                )
+            )
     else:
         dataset_root = Path(dataset_root).resolve()
         for task in tasks:
@@ -69,26 +107,34 @@ def discover(input_path, dataset_root, output, tasks, limit, gt_dir=None):
             if limit:
                 paths = paths[:limit]
             for p in paths:
-                records.append(Sample(p, output / task / p.relative_to(lq_root).with_suffix(".png"), task,
-                                      matching_reference(p, lq_root, gt_root)))
-    if not records:
-        raise ValueError("No input images found")
-    outputs = [str(s.output) for s in records]
-    if len(outputs) != len(set(outputs)):
-        raise ValueError("Input images map to duplicate PNG output paths")
-    for sample in records:
-        if sample.output.resolve() == sample.source.resolve() or (
-                sample.reference and sample.output.resolve() == sample.reference.resolve()):
-            raise ValueError("Output path must differ from input and GT")
-    return records
+                records.append(
+                    Sample(
+                        p,
+                        output / task / p.relative_to(lq_root).with_suffix(".png"),
+                        task,
+                        matching_reference(p, lq_root, gt_root),
+                    )
+                )
+    return validate_samples(records)
 
 
 def load_input(path):
-    array = np.asarray(Image.open(path).convert("RGB"))
+    with Image.open(path) as image:
+        array = np.asarray(image.convert("RGB"))
     height, width = array.shape[:2]
-    # OpenCV BORDER_REFLECT in the original loader includes the border pixel.
-    array = np.pad(array, ((0, (-height) % 32), (0, (-width) % 32), (0, 0)), mode="symmetric")
-    tensor = torch.from_numpy(array.copy()).permute(2, 0, 1).float().div_(255).mul_(2).sub_(1).unsqueeze(0)
+
+    array = np.pad(
+        array, ((0, (-height) % 32), (0, (-width) % 32), (0, 0)), mode="symmetric"
+    )
+    tensor = (
+        torch.from_numpy(array.copy())
+        .permute(2, 0, 1)
+        .float()
+        .div_(255)
+        .mul_(2)
+        .sub_(1)
+        .unsqueeze(0)
+    )
     return tensor, (height, width)
 
 

@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .DS_Store
+.nfs*
 .idea/
 .vscode/
 .env
@@ -13,8 +14,7 @@ __pycache__/
 *.ckpt
 *.safetensors
 *.bin
-checkpoints/*
-!checkpoints/README.md
+checkpoints/
 data/
 datasets/
 outputs*/

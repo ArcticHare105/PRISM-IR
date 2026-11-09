@@ -1,18 +1,29 @@
-"""Check weight loading and phase correctness; no model-size or speed statistics."""
-import copy
 import torch
 
 
 def model_structure(model):
     return {
-        "ranks": {f"rank_{network}_{adapter}": getattr(model, f"lora_rank_{network}_{adapter}")
-                  for network in ("unet", "vae") for adapter in ("deg", "vq")},
-        "selector_dimensions": {"unet": [1024, model.rank_unet * 4, model.rank_unet * 2, model.rank_unet],
-                                "vae": [1024, model.rank_vae * 4, model.rank_vae * 2, model.rank_vae]},
-        "adapters": {network: {name: {"rank": config.r, "alpha": config.lora_alpha}
-                               for name, config in getattr(model, network).peft_config.items()}
-                     for network in ("unet", "vae")},
-        "adapter_rebase": copy.deepcopy(model.adapter_rebase), "timestep": int(model.timesteps.item())}
+        "ranks": {
+            f"rank_{network}_{adapter}": getattr(
+                model, f"lora_rank_{network}_{adapter}"
+            )
+            for network in ("unet", "vae")
+            for adapter in ("deg", "vq")
+        },
+        "selector_dimensions": {
+            "unet": [1024, model.rank_unet * 4, model.rank_unet * 2, model.rank_unet],
+            "vae": [1024, model.rank_vae * 4, model.rank_vae * 2, model.rank_vae],
+        },
+        "adapters": {
+            network: {
+                name: {"rank": config.r, "alpha": config.lora_alpha}
+                for name, config in getattr(model, network).peft_config.items()
+            }
+            for network in ("unet", "vae")
+        },
+        "vq_mode": "separate_adapter",
+        "timestep": int(model.timesteps.item()),
+    }
 
 
 def check_checkpoint(model, checkpoint):
@@ -26,8 +37,12 @@ def check_checkpoint(model, checkpoint):
             if set(value) != set(loaded):
                 raise ValueError(f"Checkpoint/model tensor names differ: {field}")
             for name, tensor in value.items():
-                if tensor.shape != loaded[name].shape or not torch.equal(tensor, loaded[name]):
-                    raise ValueError(f"Checkpoint/model tensor mismatch: {field}.{name}")
+                if tensor.shape != loaded[name].shape or not torch.equal(
+                    tensor, loaded[name]
+                ):
+                    raise ValueError(
+                        f"Checkpoint/model tensor mismatch: {field}.{name}"
+                    )
         elif actual[field] != value:
             raise ValueError(f"Checkpoint/model metadata differs: {field}")
     return check_training_phases(model)
@@ -38,11 +53,18 @@ def check_fresh_initialization(model):
         for name, parameter in network.named_parameters():
             if "lora_B." in name and torch.any(parameter.detach() != 0):
                 raise ValueError(f"Fresh LoRA B must be zero: {name}")
-            if "lora_A." in name and (not torch.isfinite(parameter).all() or not torch.any(parameter.detach() != 0)):
-                raise ValueError(f"Fresh LoRA A must have finite random weights: {name}")
+            if "lora_A." in name and (
+                not torch.isfinite(parameter).all()
+                or not torch.any(parameter.detach() != 0)
+            ):
+                raise ValueError(
+                    f"Fresh LoRA A must have finite random weights: {name}"
+                )
     for name, parameter in model.vae.decoder.named_parameters():
         if name.startswith("skip_conv_") and not torch.all(parameter.detach() == 1e-5):
-            raise ValueError(f"Unexpected fresh skip-convolution initialization: {name}")
+            raise ValueError(
+                f"Unexpected fresh skip-convolution initialization: {name}"
+            )
     return check_training_phases(model)
 
 
@@ -50,9 +72,15 @@ def check_training_phases(model):
     for phase in ("deg", "vq"):
         model.set_phase(phase)
         other = "vq" if phase == "deg" else "deg"
-        if any(f"_{other}." in name and p.requires_grad for name, p in model.named_parameters()):
+        if any(
+            f"_{other}." in name and p.requires_grad
+            for name, p in model.named_parameters()
+        ):
             raise ValueError(f"Inactive LoRA branch is trainable in {phase} phase")
-        if not any(f"_{phase}." in name and p.requires_grad for name, p in model.named_parameters()):
+        if not any(
+            f"_{phase}." in name and p.requires_grad
+            for name, p in model.named_parameters()
+        ):
             raise ValueError(f"Active LoRA branch is frozen in {phase} phase")
     model.set_train()
     return model_structure(model)

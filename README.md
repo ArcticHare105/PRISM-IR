@@ -1,104 +1,80 @@
-# PRISM-IR: All-in-One Image Restoration
+# PRISM-IR
 
-Code for training, inference, and evaluation on ten image restoration tasks.
+Training and testing for 3-task, 5-task, and 10-task image restoration.
 
-## Framework Overview
-
-![Framework overview placeholder](assets/framework.svg)
-
-<!-- Replace assets/framework.svg with the framework figure. -->
-
-## Visual Comparison
-
-![Visual comparison placeholder](assets/comparison.svg)
-
-<!-- Replace assets/comparison.svg with the visual comparison figure. -->
-
-## Setup
+## Installation
 
 ```bash
-conda create -n irdiff python=3.10
-conda activate irdiff
+conda create -n prism-ir python=3.10
+conda activate prism-ir
 pip install -r requirements-training.txt
 ```
 
-Keep the provided dependency versions, especially `diffusers` and `peft`.
+## Weights and Configuration
 
-## Checkpoints
+Download the weights for the selected setting. Google Drive links will be added below.
+[SD-Turbo](https://huggingface.co/stabilityai/sd-turbo) is downloaded automatically
+when `sd_path` is `null`; a local path can also be used.
 
-**Our checkpoints — Google Drive: to be added.**
+| Setting | Config | DA-CLIP (Google Drive) | Model (Google Drive) |
+|---|---|---|---|
+| 3-task | [ir_3task.yaml](configs/ir_3task.yaml) | To be added | To be added |
+| 5-task | [ir_5task.yaml](configs/ir_5task.yaml) | To be added | To be added |
+| 10-task | [ir_10task.yaml](configs/ir_10task.yaml) | To be added | To be added |
 
-<!-- Replace with: [Google Drive](https://drive.google.com/drive/folders/YOUR_FOLDER_ID) -->
+Use the corresponding filenames from the YAML:
 
-Download [SD-Turbo](https://huggingface.co/stabilityai/sd-turbo) and
-[DA-CLIP](https://github.com/Algolzw/daclip-uir), then update the `/path/to/...`
-entries in `configs/ir.yaml`. Training also requires the CLIP ViT-B/32, VGG16,
-and LPIPS VGG calibration files specified there. Weight files are downloaded separately.
+| Setting | DA-CLIP | Model |
+|---|---|---|
+| 3-task | `daclip_3_tasks.pt` | `checkpoints/model_3_tasks.pkl` |
+| 5-task | `daclip_5_tasks.pt` | `checkpoints/model_5_tasks.pkl` |
+| 10-task | `daclip_10_tasks.pt` | `checkpoints/model_10_tasks.pkl` |
 
-## Data Preparation
-
-Set the training and validation roots in `configs/ir.yaml`. Each root uses:
-
-```text
-<dataset_root>/
-├── noisy/{LQ,GT}/
-├── rainy/{LQ,GT}/
-├── hazy/{LQ,GT}/
-├── low-light/{LQ,GT}/
-├── motion-blurry/{LQ,GT}/
-├── snowy/{LQ,GT}/
-├── raindrop/{LQ,GT}/
-├── shadowed/{LQ,GT}/
-├── jpeg-compressed/{LQ,GT}/
-└── uncompleted/{LQ,GT}/
-```
+Set the dataset, DA-CLIP, and model paths in the selected YAML.
+Paired datasets use `<dataset_root>/<task_folder>/{LQ,GT}`.
+All training and testing settings are read from the YAML.
 
 ## Training
 
-Initial training uses 256×256 patches, batch size 16, learning rate 1e-4, and no gradient accumulation.
-Training uses a cosine learning-rate schedule for 200,000 steps; mixed precision is not forced.
-Update the paths in `configs/ir.yaml`, then run:
-
 ```bash
-CUDA_VISIBLE_DEVICES=0 bash run_training.sh
+CUDA_VISIBLE_DEVICES=0 bash run_training.sh --base_config configs/ir_3task.yaml
 ```
 
-Training starts from SD-Turbo with freshly initialized adapters. To resume an interrupted run:
-
 ```bash
-CUDA_VISIBLE_DEVICES=0 bash run_training.sh \
-  --resume training_output/checkpoints/latest_resume.pt
+CUDA_VISIBLE_DEVICES=0 bash run_training.sh --base_config configs/ir_5task.yaml
 ```
 
-## Inference
-
-Set `test_options.pretrained_path` to the downloaded checkpoint.
-
 ```bash
-# All ten tasks
-CUDA_VISIBLE_DEVICES=0 bash run_inference.sh --output_dir outputs
-
-# A single image or folder
-CUDA_VISIBLE_DEVICES=0 bash run_inference.sh \
-  --input /path/to/images --output_dir outputs_custom
+CUDA_VISIBLE_DEVICES=0 bash run_training.sh --base_config configs/ir_10task.yaml
 ```
 
-Use `--tasks delowlight` to select a task, or `--tile_size 0` for whole-image inference.
+## Testing
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash run_inference.sh --base_config configs/ir_3task.yaml
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash run_inference.sh --base_config configs/ir_5task.yaml
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash run_inference.sh --base_config configs/ir_10task.yaml
+```
 
 ## Evaluation
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 bash run_evaluate.sh \
-  -i outputs -r /path/to/datasets/all_in_one/val \
-  --metrics psnr ssim lpips fid clipiqa niqe musiq arniqa \
-  --output outputs/metrics.json
+  -i /path/to/outputs -r /path/to/GT
 ```
-
-Results include metrics for each task and their average. With all ten tasks, the task average is the ten-task mean.
 
 ## Acknowledgements
 
-This code builds on [S3Diff](https://github.com/ArcticHare105/S3Diff),
+[S3Diff](https://github.com/ArcticHare105/S3Diff),
 [DA-CLIP](https://github.com/Algolzw/daclip-uir),
 [OpenCLIP](https://github.com/mlfoundations/open_clip), and
 [Vision-aided GAN](https://github.com/nupurkmr9/vision-aided-gan).
+[S3Diff license](src/S3Diff_LICENSE),
+[OpenCLIP license](src/open_clip/LICENSE), and
+[Vision-aided GAN license](src/vision_aided_loss/LICENSE).
