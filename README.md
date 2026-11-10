@@ -2,10 +2,6 @@
 
 [Aiping Zhang]()<sup>1,*</sup>, [Zongsheng Yue]()<sup>2,*</sup>, [Yuning Cui]()<sup>3</sup>, [Alois Knoll]()<sup>3</sup>, [Renjing Pei]()<sup>4</sup>, [Wenqi Ren]()<sup>1</sup>, [Xiaochun Cao]()<sup>1</sup>
 
-<sup>1</sup>School of Cyber Science and Technology, Shenzhen Campus of Sun Yat-sen University, Shenzhen, China<br>
-<sup>2</sup>School of Mathematics and Statistics, Xi'an Jiaotong University, Shaanxi, China<br>
-<sup>3</sup>School of Computation, Information and Technology, Technical University of Munich, Munich, Germany<br>
-<sup>4</sup>Huawei Noah's Ark Lab
 </div>
 
 :fire::fire::fire: We have released the code, cheers!
